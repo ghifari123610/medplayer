@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Aura Audio</string>
+    <string name="notification_channel_name">Audio Playback</string>
+    <string name="notification_channel_desc">Shows active audio playback controls</string>
+</resources>

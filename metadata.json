@@ -1,0 +1,6 @@
+{
+  "name": "Aura Audio",
+  "description": "Android Audio Player architecture built with Kotlin, Jetpack Compose, AndroidX Media3 (ExoPlayer), and MediaSessionService running as a foreground service with system media controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
