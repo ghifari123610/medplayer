@@ -7,7 +7,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,8 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.setValueimport androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -67,8 +65,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.positionChangeimport androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -791,7 +788,7 @@ private fun StudioVerticalFader(
             )
         }
 
-        // Custom Vertical Fader Track with Continuous Drag & Tap
+        // Custom Vertical Fader Track - Single unified gesture handler
         Box(
             modifier = Modifier
                 .width(40.dp)
@@ -805,31 +802,36 @@ private fun StudioVerticalFader(
                 )
                 .pointerInput(isEnabled) {
                     if (!isEnabled) return@pointerInput
+                    val trackH = size.height.toFloat()
+                    val range = (maxMbState.value - minMbState.value).toFloat()
+
                     awaitEachGesture {
+                        // requireUnconsumed=false agar gesture tidak direbut parent scroll
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        // Konsumsi segera agar parent scroll tidak mendapat event ini
                         down.consume()
-                        val trackHeightPx = size.height.toFloat()
-                        val totalRange = (maxMbState.value - minMbState.value).toFloat()
 
-                        // Tap jump: Calculate level directly from touch down position
-                        val touchRatio = (1f - (down.position.y / trackHeightPx)).coerceIn(0f, 1f)
-                        var currentAccumulated = minMbState.value + touchRatio * totalRange
-                        onLevelChangeState.value(currentAccumulated.toInt().toShort())
+                        // Set level langsung ke posisi jari menyentuh (snap-to-position)
+                        val initRatio = (1f - (down.position.y / trackH)).coerceIn(0f, 1f)
+                        var accumulated = minMbState.value + initRatio * range
+                        onLevelChangeState.value(accumulated.toInt().toShort())
 
-                        // Continuous drag tracking
+                        // Drag loop: terus track posisi jari sampai diangkat
                         while (true) {
                             val event = awaitPointerEvent()
-                            val drag = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!drag.pressed) break
-                            drag.consume()
+                            val ptr = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!ptr.pressed) break
 
-                            val deltaY = -drag.positionChange().y
-                            val deltaMb = (deltaY / trackHeightPx) * totalRange
-                            currentAccumulated = (currentAccumulated + deltaMb).coerceIn(
+                            // Konsumsi tiap event drag agar scroll parent tidak ikut bergerak
+                            ptr.consume()
+
+                            val deltaY = -ptr.positionChange().y
+                            val deltaMb = (deltaY / trackH) * range
+                            accumulated = (accumulated + deltaMb).coerceIn(
                                 minMbState.value.toFloat(),
                                 maxMbState.value.toFloat()
                             )
-                            onLevelChangeState.value(currentAccumulated.toInt().toShort())
+                            onLevelChangeState.value(accumulated.toInt().toShort())
                         }
                     }
                 },
