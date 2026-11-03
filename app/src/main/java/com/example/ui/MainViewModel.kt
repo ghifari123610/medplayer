@@ -99,9 +99,8 @@ open class MainViewModel(application: Application) : AndroidViewModel(applicatio
     // 2. Local Audio Storage Scanner Repository
     val localAudioRepository: LocalAudioRepository = LocalAudioRepository(application.applicationContext)
 
-    // 3. Native AudioFX Equalizer Controller
-    val equalizerController: EqualizerController = PlaybackService.activeEqualizerController
-        ?: EqualizerController()
+    // 3. Native AudioFX Equalizer Controller (Shared Singleton Instance)
+    val equalizerController: EqualizerController = EqualizerController.instance
 
     // Expose EqualizerUiState StateFlow for UI screens
     val equalizerState: StateFlow<EqualizerUiState> = equalizerController.uiState

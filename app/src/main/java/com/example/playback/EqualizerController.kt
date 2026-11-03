@@ -47,8 +47,12 @@ data class EqualizerUiState(
  * menggunakan native API android.media.audiofx yang dihubungkan ke audioSessionId ExoPlayer.
  */
 class EqualizerController(
-    private val priority: Int = 0
+    private val priority: Int = 1000
 ) {
+    companion object {
+        val instance: EqualizerController by lazy { EqualizerController(priority = 1000) }
+    }
+
     private val tag = "EqualizerController"
 
     private var equalizer: Equalizer? = null
@@ -119,6 +123,35 @@ class EqualizerController(
             } catch (e: Exception) {
                 Log.w(tag, "Virtualizer not supported: ${e.message}")
                 null
+            }
+
+            // Terapkan nilai gain, bass boost, dan virtualizer yang tersimpan di UI ke hardware DSP
+            val current = _uiState.value
+            equalizer?.enabled = current.isEnabled
+            current.bands.forEach { bandInfo ->
+                try {
+                    val (minMb, maxMb) = getBandLevelRange()
+                    val clamped = bandInfo.levelMb.coerceIn(minMb, maxMb)
+                    equalizer?.setBandLevel(bandInfo.band, clamped)
+                } catch (e: Exception) {
+                    Log.w(tag, "Failed applying band ${bandInfo.band}: ${e.message}")
+                }
+            }
+            try {
+                bassBoost?.enabled = current.isBassBoostEnabled
+                if (bassBoost?.strengthSupported == true) {
+                    bassBoost?.setStrength(current.bassBoostStrength)
+                }
+            } catch (e: Exception) {
+                Log.w(tag, "Failed applying bassboost: ${e.message}")
+            }
+            try {
+                virtualizer?.enabled = current.isVirtualizerEnabled
+                if (virtualizer?.strengthSupported == true) {
+                    virtualizer?.setStrength(current.virtualizerStrength)
+                }
+            } catch (e: Exception) {
+                Log.w(tag, "Failed applying virtualizer: ${e.message}")
             }
 
             refreshState()

@@ -3,7 +3,10 @@ package com.example.playback
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
+import android.media.audiofx.AudioEffect
 import android.os.Build
 import android.os.Bundle
 import androidx.annotation.OptIn
@@ -52,13 +55,25 @@ class PlaybackService : MediaSessionService() {
             .setSeekForwardIncrementMs(10000)
             .build()
 
-        // 3. Connect EqualizerController to ExoPlayer's native audioSessionId
-        val eq = activeEqualizerController ?: EqualizerController().also { activeEqualizerController = it }
+        // 3. Connect EqualizerController to explicit ExoPlayer audioSessionId
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val allocatedSessionId = audioManager.generateAudioSessionId()
+        exoPlayer.setAudioSessionId(allocatedSessionId)
+
+        val eq = EqualizerController.instance
         equalizerController = eq
-        val sessionId = exoPlayer.audioSessionId
-        if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != 0) {
-            eq.bindToAudioSession(sessionId)
-        }
+        activeEqualizerController = eq
+        eq.bindToAudioSession(allocatedSessionId)
+        sendAudioSessionBroadcast(allocatedSessionId, open = true)
+
+        exoPlayer.addListener(object : Player.Listener {
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                if (audioSessionId != C.AUDIO_SESSION_ID_UNSET && audioSessionId != 0) {
+                    eq.bindToAudioSession(audioSessionId)
+                    sendAudioSessionBroadcast(audioSessionId, open = true)
+                }
+            }
+        })
 
         // 4. Create PendingIntent to reopen MainActivity from the media notification
         val sessionActivityPendingIntent = PendingIntent.getActivity(
@@ -72,7 +87,7 @@ class PlaybackService : MediaSessionService() {
 
         // 5. Expose audioSessionId in Session Extras
         val sessionExtras = Bundle().apply {
-            putInt("AUDIO_SESSION_ID", exoPlayer.audioSessionId)
+            putInt("AUDIO_SESSION_ID", allocatedSessionId)
         }
 
         // 6. Build MediaSession attached to ExoPlayer
@@ -102,6 +117,9 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        if (::exoPlayer.isInitialized) {
+            sendAudioSessionBroadcast(exoPlayer.audioSessionId, open = false)
+        }
         equalizerController?.release()
         equalizerController = null
         activeEqualizerController = null
@@ -112,6 +130,18 @@ class PlaybackService : MediaSessionService() {
             mediaSession = null
         }
         super.onDestroy()
+    }
+
+    private fun sendAudioSessionBroadcast(sessionId: Int, open: Boolean) {
+        if (sessionId == 0 || sessionId == C.AUDIO_SESSION_ID_UNSET) return
+        val action = if (open) AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION
+        else AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION
+        val intent = Intent(action).apply {
+            putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+            putExtra(AudioEffect.EXTRA_PACKAGE_NAME, packageName)
+            putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
+        }
+        sendBroadcast(intent)
     }
 
     private fun createNotificationChannel() {
