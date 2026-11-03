@@ -4,6 +4,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +54,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +67,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -724,6 +728,11 @@ private fun StudioVerticalFader(
     isEnabled: Boolean,
     onLevelChange: (Short) -> Unit
 ) {
+    val currentLevelState = rememberUpdatedState(bandInfo.levelMb)
+    val onLevelChangeState = rememberUpdatedState(onLevelChange)
+    val minMbState = rememberUpdatedState(bandInfo.minMb)
+    val maxMbState = rememberUpdatedState(bandInfo.maxMb)
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -760,15 +769,15 @@ private fun StudioVerticalFader(
         // Increment Button (+)
         Box(
             modifier = Modifier
-                .size(24.dp)
+                .size(26.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .background(SurfaceElevated)
                 .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(6.dp))
                 .pointerInput(isEnabled) {
                     if (isEnabled) {
                         detectTapGestures {
-                            val next = (bandInfo.levelMb + 100).coerceAtMost(bandInfo.maxMb.toInt()).toShort()
-                            onLevelChange(next)
+                            val next = (currentLevelState.value + 100).coerceAtMost(maxMbState.value.toInt()).toShort()
+                            onLevelChangeState.value(next)
                         }
                     }
                 },
@@ -778,48 +787,49 @@ private fun StudioVerticalFader(
                 text = "+",
                 color = if (isEnabled) NeonCyan else TextMuted,
                 fontWeight = FontWeight.Bold,
-                fontSize = 14.sp
+                fontSize = 15.sp
             )
         }
 
-        // Custom Vertical Fader Track with Native Vertical Drag & Tap
+        // Custom Vertical Fader Track with Continuous Drag & Tap
         Box(
             modifier = Modifier
-                .width(36.dp)
+                .width(40.dp)
                 .height(150.dp)
-                .clip(RoundedCornerShape(18.dp))
+                .clip(RoundedCornerShape(20.dp))
                 .background(SurfaceElevated)
                 .border(
                     width = 1.dp,
-                    color = if (isEnabled) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.05f),
-                    shape = RoundedCornerShape(18.dp)
+                    color = if (isEnabled) Color.White.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.05f),
+                    shape = RoundedCornerShape(20.dp)
                 )
-                .pointerInput(isEnabled, bandInfo.minMb, bandInfo.maxMb) {
-                    if (isEnabled) {
-                        detectVerticalDragGestures(
-                            onVerticalDrag = { change, dragAmount ->
-                                change.consume()
-                                val totalRange = (bandInfo.maxMb - bandInfo.minMb).toFloat()
-                                val deltaMb = (-dragAmount / size.height.toFloat()) * totalRange
-                                val newLevel = (bandInfo.levelMb + deltaMb)
-                                    .coerceIn(bandInfo.minMb.toFloat(), bandInfo.maxMb.toFloat())
-                                    .toInt()
-                                    .toShort()
-                                onLevelChange(newLevel)
-                            }
-                        )
-                    }
-                }
-                .pointerInput(isEnabled, bandInfo.minMb, bandInfo.maxMb) {
-                    if (isEnabled) {
-                        detectTapGestures { tapOffset ->
-                            val totalRange = (bandInfo.maxMb - bandInfo.minMb).toFloat()
-                            val ratio = 1f - (tapOffset.y / size.height.toFloat()).coerceIn(0f, 1f)
-                            val newLevel = (bandInfo.minMb + ratio * totalRange)
-                                .coerceIn(bandInfo.minMb.toFloat(), bandInfo.maxMb.toFloat())
-                                .toInt()
-                                .toShort()
-                            onLevelChange(newLevel)
+                .pointerInput(isEnabled) {
+                    if (!isEnabled) return@pointerInput
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        down.consume()
+                        val trackHeightPx = size.height.toFloat()
+                        val totalRange = (maxMbState.value - minMbState.value).toFloat()
+
+                        // Tap jump: Calculate level directly from touch down position
+                        val touchRatio = (1f - (down.position.y / trackHeightPx)).coerceIn(0f, 1f)
+                        var currentAccumulated = minMbState.value + touchRatio * totalRange
+                        onLevelChangeState.value(currentAccumulated.toInt().toShort())
+
+                        // Continuous drag tracking
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val drag = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!drag.pressed) break
+                            drag.consume()
+
+                            val deltaY = -drag.positionChange().y
+                            val deltaMb = (deltaY / trackHeightPx) * totalRange
+                            currentAccumulated = (currentAccumulated + deltaMb).coerceIn(
+                                minMbState.value.toFloat(),
+                                maxMbState.value.toFloat()
+                            )
+                            onLevelChangeState.value(currentAccumulated.toInt().toShort())
                         }
                     }
                 },
@@ -833,7 +843,7 @@ private fun StudioVerticalFader(
 
                 // Center 0 dB guide line
                 drawLine(
-                    color = Color.White.copy(alpha = 0.25f),
+                    color = Color.White.copy(alpha = 0.3f),
                     start = Offset(4.dp.toPx(), centerY),
                     end = Offset(w - 4.dp.toPx(), centerY),
                     strokeWidth = 2.dp.toPx()
@@ -847,7 +857,7 @@ private fun StudioVerticalFader(
                 if (isEnabled) {
                     val fillTop = minOf(centerY, thumbY)
                     val fillBottom = maxOf(centerY, thumbY)
-                    val fillColor = if (thumbY <= centerY) NeonCyan.copy(alpha = 0.45f) else SunsetPink.copy(alpha = 0.45f)
+                    val fillColor = if (thumbY <= centerY) NeonCyan.copy(alpha = 0.5f) else SunsetPink.copy(alpha = 0.5f)
 
                     drawRoundRect(
                         color = fillColor,
@@ -869,7 +879,7 @@ private fun StudioVerticalFader(
                     .graphicsLayer {
                         translationY = verticalBias * ((150.dp.toPx() - 28.dp.toPx()) / 2f)
                     }
-                    .size(width = 30.dp, height = 22.dp)
+                    .size(width = 34.dp, height = 24.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(
                         if (isEnabled) Brush.linearGradient(listOf(ElectricPurple, NeonCyan))
@@ -877,7 +887,7 @@ private fun StudioVerticalFader(
                     )
                     .border(
                         1.dp,
-                        if (isEnabled) Color.White.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.1f),
+                        if (isEnabled) Color.White.copy(alpha = 0.7f) else Color.White.copy(alpha = 0.1f),
                         RoundedCornerShape(8.dp)
                     ),
                 contentAlignment = Alignment.Center
@@ -885,8 +895,8 @@ private fun StudioVerticalFader(
                 // Notch line in thumb
                 Box(
                     modifier = Modifier
-                        .width(14.dp)
-                        .height(2.dp)
+                        .width(16.dp)
+                        .height(2.5.dp)
                         .background(Color.White)
                 )
             }
@@ -895,15 +905,15 @@ private fun StudioVerticalFader(
         // Decrement Button (-)
         Box(
             modifier = Modifier
-                .size(24.dp)
+                .size(26.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .background(SurfaceElevated)
                 .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(6.dp))
                 .pointerInput(isEnabled) {
                     if (isEnabled) {
                         detectTapGestures {
-                            val next = (bandInfo.levelMb - 100).coerceAtLeast(bandInfo.minMb.toInt()).toShort()
-                            onLevelChange(next)
+                            val next = (currentLevelState.value - 100).coerceAtLeast(minMbState.value.toInt()).toShort()
+                            onLevelChangeState.value(next)
                         }
                     }
                 },
@@ -913,7 +923,7 @@ private fun StudioVerticalFader(
                 text = "−",
                 color = if (isEnabled) SunsetPink else TextMuted,
                 fontWeight = FontWeight.Bold,
-                fontSize = 14.sp
+                fontSize = 15.sp
             )
         }
 
