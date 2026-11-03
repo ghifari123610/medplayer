@@ -57,8 +57,33 @@ class EqualizerController(
 
     private var currentSessionId: Int = 0
 
-    private val _uiState = MutableStateFlow(EqualizerUiState())
+    private val _uiState = MutableStateFlow(
+        EqualizerUiState(
+            isEnabled = true,
+            bands = listOf(
+                EqualizerBandInfo(0, 60, 0, -1500, 1500),
+                EqualizerBandInfo(1, 230, 0, -1500, 1500),
+                EqualizerBandInfo(2, 910, 0, -1500, 1500),
+                EqualizerBandInfo(3, 3600, 0, -1500, 1500),
+                EqualizerBandInfo(4, 14000, 0, -1500, 1500)
+            ),
+            presets = listOf("Normal", "Classical", "Dance", "Flat", "Folk", "Heavy Metal", "Hip Hop", "Jazz", "Pop", "Rock"),
+            currentPreset = 0,
+            minLevelMb = -1500,
+            maxLevelMb = 1500,
+            isBassBoostEnabled = true,
+            bassBoostStrength = 350,
+            isVirtualizerEnabled = true,
+            virtualizerStrength = 250,
+            isAvailable = true,
+            audioSessionId = 0
+        )
+    )
     val uiState: StateFlow<EqualizerUiState> = _uiState.asStateFlow()
+
+    init {
+        setupFallbackState(0)
+    }
 
     /**
      * Menghubungkan controller audio effect dengan audioSessionId dari instans ExoPlayer Media3.
@@ -218,9 +243,33 @@ class EqualizerController(
             } catch (e: Exception) {
                 Log.e(tag, "Error using preset: ${e.message}")
             }
+            refreshBandsFromEqualizer(presetIndex)
+        } else {
+            applyFallbackPreset(presetIndex)
         }
+    }
 
-        refreshBandsFromEqualizer(presetIndex)
+    private fun applyFallbackPreset(presetIndex: Short) {
+        val presetGains: List<Short> = when (presetIndex.toInt()) {
+            0 -> listOf(0, 0, 0, 0, 0) // Normal
+            1 -> listOf(400, 250, -150, 300, 400) // Classical
+            2 -> listOf(600, 0, 200, 400, 100) // Dance
+            3 -> listOf(0, 0, 0, 0, 0) // Flat
+            4 -> listOf(300, 0, 0, 200, -100) // Folk
+            5 -> listOf(450, 100, -200, 350, 100) // Heavy Metal
+            6 -> listOf(500, 300, 0, 150, 300) // Hip Hop
+            7 -> listOf(0, 250, 0, 200, 450) // Jazz
+            8 -> listOf(-150, 200, 450, 100, -200) // Pop
+            9 -> listOf(450, 300, -150, 250, 500) // Rock
+            else -> listOf(0, 0, 0, 0, 0)
+        }
+        _uiState.update { state ->
+            val updated = state.bands.mapIndexed { idx, band ->
+                val level = presetGains.getOrElse(idx) { 0.toShort() }
+                band.copy(levelMb = level)
+            }
+            state.copy(bands = updated, currentPreset = presetIndex)
+        }
     }
 
     /**
@@ -289,6 +338,10 @@ class EqualizerController(
             val maxMb: Short = if (range.size >= 2) range[1] else 1500.toShort()
 
             val numBands = eq.numberOfBands.toInt()
+            if (numBands <= 0) {
+                setupFallbackState(currentSessionId)
+                return
+            }
             val bandList = mutableListOf<EqualizerBandInfo>()
             for (i in 0 until numBands) {
                 val band = i.toShort()

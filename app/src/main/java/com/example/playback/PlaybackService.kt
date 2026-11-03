@@ -53,13 +53,12 @@ class PlaybackService : MediaSessionService() {
             .build()
 
         // 3. Connect EqualizerController to ExoPlayer's native audioSessionId
-        equalizerController = EqualizerController().apply {
-            val sessionId = exoPlayer.audioSessionId
-            if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != 0) {
-                bindToAudioSession(sessionId)
-            }
+        val eq = activeEqualizerController ?: EqualizerController().also { activeEqualizerController = it }
+        equalizerController = eq
+        val sessionId = exoPlayer.audioSessionId
+        if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != 0) {
+            eq.bindToAudioSession(sessionId)
         }
-        activeEqualizerController = equalizerController
 
         // 4. Create PendingIntent to reopen MainActivity from the media notification
         val sessionActivityPendingIntent = PendingIntent.getActivity(
